@@ -1,0 +1,66 @@
+name: Leads Merger — Daily Summary Report
+
+on:
+  # ── Scheduled run ──────────────────────────────────────────────────────────
+  # Runs at 8:00 PM IST (14:30 UTC) every day Mon–Sat.
+  # Adjust the cron expression below if you need a different time.
+  #   IST = UTC + 5:30  →  8:00 PM IST = 14:30 UTC
+  schedule:
+    - cron: "30 14 * * 1-6"   # Mon–Sat 8:00 PM IST
+
+  # ── Manual trigger ─────────────────────────────────────────────────────────
+  # Run any time from the GitHub Actions tab using "Run workflow".
+  workflow_dispatch:
+
+jobs:
+  run-leads-merger:
+    name: Run Leads Merger v21
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30          # kill the job if it hangs
+
+    steps:
+      # ── 1. Checkout repo ───────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ───────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"           # cache pip downloads between runs
+
+      # ── 3. Install dependencies ────────────────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "gspread>=5.0" \
+            "openpyxl>=3.1" \
+            "pandas>=2.0" \
+            "google-auth>=2.0"
+
+      # ── 4. Create output directory ─────────────────────────────────────────
+      - name: Create output directory
+        run: mkdir -p output
+
+      # ── 5. Run leads merger script ─────────────────────────────────────────
+      - name: Run leads_merger_v21.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python leads_merger_v21.py
+
+      # ── 6. Upload XLSX files as GHA artifacts ──────────────────────────────
+      # Artifacts are kept for 7 days and can be downloaded from the
+      # GitHub Actions run page.
+      - name: Upload output artifacts
+        if: always()             # upload even if the script fails (partial output)
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-report-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            output/Leads_Summary_Report.xlsx
+            output/Leads_Summary_Matrix.xlsx
+            output/Leads_Final_Output.csv
+          retention-days: 7
+          if-no-files-found: warn
