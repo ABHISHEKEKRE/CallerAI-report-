@@ -1929,8 +1929,15 @@ OUTPUT_LOCAL         = OUTPUT_DIR / "Leads_Final_Output.csv"
 SUMMARY_LOCAL        = OUTPUT_DIR / "Leads_Summary_Report.xlsx"
 SUMMARY_MATRIX_LOCAL = OUTPUT_DIR / "Leads_Summary_Matrix.xlsx"
 
-SD_SHEET_ID    = "1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E"
-SD_SHEET_GID   = 758486581
+# SD_SHEET_ID    = "1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E"
+# SD_SHEET_GID   = 758486581
+# All cumulative disposition sheets — keep in sync with DISPOSITION_CUMULATIVE_SHEET_IDS in ozontel.py
+# Format: (sheet_id, gid)  — Sheet 1 uses specific gid; overflow sheets use gid=0 (first tab)
+SD_SHEETS = [
+    ("1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E", 758486581),  # Sheet 1 — original
+    ("1Qt-n-QYnDykALFjYphDIIXdhOFbd7_ppqr6ZhmvXpNo",0)
+    # ("PASTE_CUMULATIVE_SHEET_2_ID_HERE", 0),                      # Sheet 2 — add when you create it
+]
 SD_PHONE_COL   = "Phone Number"
 SD_DATE_COL    = "Activity Date"
 SD_DISP1_COL   = "Disposition 1"
@@ -2246,9 +2253,24 @@ print(f"OK Paid sheet -- unique paid: {len(paid_set):,}  |  today: {len(paid_set
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 4 — LSQ Sales Disposition
 # ══════════════════════════════════════════════════════════════════════════════
-_disp_url = (f"https://docs.google.com/spreadsheets/d/{SD_SHEET_ID}"
-             f"/export?format=csv&gid={SD_SHEET_GID}")
-df_sd = pd.read_csv(_disp_url, low_memory=False)
+# _disp_url = (f"https://docs.google.com/spreadsheets/d/{SD_SHEET_ID}"
+#              f"/export?format=csv&gid={SD_SHEET_GID}")
+# df_sd = pd.read_csv(_disp_url, low_memory=False)
+_sd_frames = []
+for _sd_id, _sd_gid in SD_SHEETS:
+    _disp_url = (f"https://docs.google.com/spreadsheets/d/{_sd_id}"
+                 f"/export?format=csv&gid={_sd_gid}")
+    try:
+        _df_chunk = pd.read_csv(_disp_url, low_memory=False)
+        _df_chunk.columns = _df_chunk.columns.str.strip()
+        _sd_frames.append(_df_chunk)
+        print(f"   Loaded SD sheet {_sd_id}: {len(_df_chunk):,} rows")
+    except Exception as _sd_err:
+        print(f"   WARNING: Could not load SD sheet {_sd_id}: {_sd_err}")
+
+if not _sd_frames:
+    raise RuntimeError("No cumulative disposition sheets could be loaded.")
+df_sd = pd.concat(_sd_frames, ignore_index=True)
 df_sd.columns = df_sd.columns.str.strip()
 if SD_ADDED_BY not in df_sd.columns:
     raise KeyError(f"'{SD_ADDED_BY}' column missing.")
