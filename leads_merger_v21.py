@@ -1864,8 +1864,12 @@ TTC_TAB_NAME      = "TTC"
 UNCALLED_TAB_NAME = "Uncalled"
 TTC_SOURCE        = "TTC"
 
-WINBACK_TAB_NAME  = "Winback"
+# WINBACK_TAB_NAME  = "Winback"
 WINBACK_SOURCE    = "Winback"
+WINBACK_SHEETS = [
+    (CALLER_AI_SHEET_ID, "Winback"),              # original sheet — existing data
+    ("1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ", "Winback"), # new overflow sheet — add tab name too
+]
 
 RENEWAL_TTC_TAB_NAME = "Renewal_TTC"
 RENEWAL_TTC_SOURCE   = "Renewal_TTC"
@@ -2099,7 +2103,21 @@ print(f"   TTC merged raw: {len(df_ttc_raw):,}  "
       f"({TTC_TAB_NAME}: {len(df_ttc_tab):,} + {UNCALLED_TAB_NAME}: {len(df_unc_tab):,})")
 
 print("\n-- Campaign 3: Winback (single tab) -------------------------------------")
-df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_TAB_NAME)
+# df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_TAB_NAME)
+# AFTER:
+print(f"\n-- Campaign 3: Winback (merging {len(WINBACK_SHEETS)} sheets) -------------")
+_win_frames = []
+for _wb_sid, _wb_tab in WINBACK_SHEETS:
+    try:
+        _wb_sh   = gc.open_by_key(_wb_sid)
+        _wb_tabs = {ws.title: ws for ws in _wb_sh.worksheets()}
+        _wb_df   = gsheet_tab_to_df(_wb_tabs, _wb_tab)
+        _win_frames.append(_wb_df)
+    except Exception as _wb_err:
+        print(f"   WARNING: Could not load Winback sheet {_wb_sid}: {_wb_err}")
+df_win_raw = pd.concat([f for f in _win_frames if not f.empty], ignore_index=True)
+print(f"   Winback merged raw: {len(df_win_raw):,}  "
+      + "  |  ".join(f"{t}: {len(f):,}" for (_,t), f in zip(WINBACK_SHEETS, _win_frames)))
 
 print("\n-- Campaign 4: Renewal_TTC (single tab) ---------------------------------")
 df_renewal_ttc_raw = gsheet_tab_to_df(tabs_map, RENEWAL_TTC_TAB_NAME)
