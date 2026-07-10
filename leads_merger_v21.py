@@ -1,40 +1,41 @@
-# ==============================================================================
-#  Leads <-> Sales Activity Merger + Summary Report  (GitHub Actions)
-#  v21 -- GHA compat, Google Sheets output, Grand Total, whole numbers,
-#         reordered summary columns.
-# ==============================================================================
-# Changes from v20:
-#  (1) SUMMARY_METRIC_COLS reordered to:
-#        Segment | Attempted | Company Answered | Our Answered | AI Qualified |
-#        Paid | AI Qual & Paid | AI Qual & Paid Rev | Answered & Paid |
-#        Ans & Paid Rev | Conv% (Attempted) | Conv% (Answered) |
-#        AI Unqual & Paid | AI Unqual & Paid Rev
-#  (2) Grand Total row added to Today's Summary + Overall Summary
-#      (both in the XLSX tabs AND in the Google Sheets write).
-#  (3) Whole numbers throughout:
-#        Conv% -> round to nearest integer % (no ".1" decimal)
-#        Revenue columns -> int (no ".0" suffix)
-#  (4) Lead Summary Report written to Google Sheet via service account:
-#        https://docs.google.com/spreadsheets/d/1rP_72DZtCWxRXlTuCsy1J38gaMJIeWn4FpH6fP1LBDE
-#        First sheet (gid=0) is cleared and rewritten each run.
-#  (5) GitHub Actions compatible:
-#        - Auth via GOOGLE_SERVICE_ACCOUNT_JSON env var (GitHub Secret)
-#        - No google.colab dependencies
-#        - Output XLSX files saved to ./output/ (uploadable as GHA artifact)
-#        - No Google Drive copy steps
-# ==============================================================================
-# requirements.txt:
-#   gspread>=5.0
-#   openpyxl
-#   pandas
-#   google-auth
-# ==============================================================================
-# GitHub workflow snippet:
-#   - name: Run leads merger
-#     env:
-#       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-#     run: python leads_merger_v21.py
-# ==============================================================================
+
+# # ==============================================================================
+# #  Leads <-> Sales Activity Merger + Summary Report  (GitHub Actions)
+# #  v21 -- GHA compat, Google Sheets output, Grand Total, whole numbers,
+# #         reordered summary columns.
+# # ==============================================================================
+# # Changes from v20:
+# #  (1) SUMMARY_METRIC_COLS reordered to:
+# #        Segment | Attempted | Company Answered | Our Answered | AI Qualified |
+# #        Paid | AI Qual & Paid | AI Qual & Paid Rev | Answered & Paid |
+# #        Ans & Paid Rev | Conv% (Attempted) | Conv% (Answered) |
+# #        AI Unqual & Paid | AI Unqual & Paid Rev
+# #  (2) Grand Total row added to Today's Summary + Overall Summary
+# #      (both in the XLSX tabs AND in the Google Sheets write).
+# #  (3) Whole numbers throughout:
+# #        Conv% -> round to nearest integer % (no ".1" decimal)
+# #        Revenue columns -> int (no ".0" suffix)
+# #  (4) Lead Summary Report written to Google Sheet via service account:
+# #        https://docs.google.com/spreadsheets/d/1rP_72DZtCWxRXlTuCsy1J38gaMJIeWn4FpH6fP1LBDE
+# #        First sheet (gid=0) is cleared and rewritten each run.
+# #  (5) GitHub Actions compatible:
+# #        - Auth via GOOGLE_SERVICE_ACCOUNT_JSON env var (GitHub Secret)
+# #        - No google.colab dependencies
+# #        - Output XLSX files saved to ./output/ (uploadable as GHA artifact)
+# #        - No Google Drive copy steps
+# # ==============================================================================
+# # requirements.txt:
+# #   gspread>=5.0
+# #   openpyxl
+# #   pandas
+# #   google-auth
+# # ==============================================================================
+# # GitHub workflow snippet:
+# #   - name: Run leads merger
+# #     env:
+# #       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+# #     run: python leads_merger_v21.py
+# # ==============================================================================
 
 # import re, json, os
 # from collections import Counter
@@ -55,8 +56,12 @@
 # UNCALLED_TAB_NAME = "Uncalled"
 # TTC_SOURCE        = "TTC"
 
-# WINBACK_TAB_NAME  = "Winback"
+# # WINBACK_TAB_NAME  = "Winback"
 # WINBACK_SOURCE    = "Winback"
+# WINBACK_SHEETS = [
+#     (CALLER_AI_SHEET_ID, "Winback"),              # original sheet — existing data
+#     ("1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ", "Winback"), # new overflow sheet — add tab name too
+# ]
 
 # RENEWAL_TTC_TAB_NAME = "Renewal_TTC"
 # RENEWAL_TTC_SOURCE   = "Renewal_TTC"
@@ -120,8 +125,15 @@
 # SUMMARY_LOCAL        = OUTPUT_DIR / "Leads_Summary_Report.xlsx"
 # SUMMARY_MATRIX_LOCAL = OUTPUT_DIR / "Leads_Summary_Matrix.xlsx"
 
-# SD_SHEET_ID    = "1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E"
-# SD_SHEET_GID   = 758486581
+# # SD_SHEET_ID    = "1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E"
+# # SD_SHEET_GID   = 758486581
+# # All cumulative disposition sheets — keep in sync with DISPOSITION_CUMULATIVE_SHEET_IDS in ozontel.py
+# # Format: (sheet_id, gid)  — Sheet 1 uses specific gid; overflow sheets use gid=0 (first tab)
+# SD_SHEETS = [
+#     ("1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E", 758486581),  # Sheet 1 — original
+#     ("1Qt-n-QYnDykALFjYphDIIXdhOFbd7_ppqr6ZhmvXpNo",0)
+#     # ("PASTE_CUMULATIVE_SHEET_2_ID_HERE", 0),                      # Sheet 2 — add when you create it
+# ]
 # SD_PHONE_COL   = "Phone Number"
 # SD_DATE_COL    = "Activity Date"
 # SD_DISP1_COL   = "Disposition 1"
@@ -283,7 +295,21 @@
 #       f"({TTC_TAB_NAME}: {len(df_ttc_tab):,} + {UNCALLED_TAB_NAME}: {len(df_unc_tab):,})")
 
 # print("\n-- Campaign 3: Winback (single tab) -------------------------------------")
-# df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_TAB_NAME)
+# # df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_TAB_NAME)
+# # AFTER:
+# print(f"\n-- Campaign 3: Winback (merging {len(WINBACK_SHEETS)} sheets) -------------")
+# _win_frames = []
+# for _wb_sid, _wb_tab in WINBACK_SHEETS:
+#     try:
+#         _wb_sh   = gc.open_by_key(_wb_sid)
+#         _wb_tabs = {ws.title: ws for ws in _wb_sh.worksheets()}
+#         _wb_df   = gsheet_tab_to_df(_wb_tabs, _wb_tab)
+#         _win_frames.append(_wb_df)
+#     except Exception as _wb_err:
+#         print(f"   WARNING: Could not load Winback sheet {_wb_sid}: {_wb_err}")
+# df_win_raw = pd.concat([f for f in _win_frames if not f.empty], ignore_index=True)
+# print(f"   Winback merged raw: {len(df_win_raw):,}  "
+#       + "  |  ".join(f"{t}: {len(f):,}" for (_,t), f in zip(WINBACK_SHEETS, _win_frames)))
 
 # print("\n-- Campaign 4: Renewal_TTC (single tab) ---------------------------------")
 # df_renewal_ttc_raw = gsheet_tab_to_df(tabs_map, RENEWAL_TTC_TAB_NAME)
@@ -437,9 +463,24 @@
 # # ══════════════════════════════════════════════════════════════════════════════
 # # STEP 4 — LSQ Sales Disposition
 # # ══════════════════════════════════════════════════════════════════════════════
-# _disp_url = (f"https://docs.google.com/spreadsheets/d/{SD_SHEET_ID}"
-#              f"/export?format=csv&gid={SD_SHEET_GID}")
-# df_sd = pd.read_csv(_disp_url, low_memory=False)
+# # _disp_url = (f"https://docs.google.com/spreadsheets/d/{SD_SHEET_ID}"
+# #              f"/export?format=csv&gid={SD_SHEET_GID}")
+# # df_sd = pd.read_csv(_disp_url, low_memory=False)
+# _sd_frames = []
+# for _sd_id, _sd_gid in SD_SHEETS:
+#     _disp_url = (f"https://docs.google.com/spreadsheets/d/{_sd_id}"
+#                  f"/export?format=csv&gid={_sd_gid}")
+#     try:
+#         _df_chunk = pd.read_csv(_disp_url, low_memory=False)
+#         _df_chunk.columns = _df_chunk.columns.str.strip()
+#         _sd_frames.append(_df_chunk)
+#         print(f"   Loaded SD sheet {_sd_id}: {len(_df_chunk):,} rows")
+#     except Exception as _sd_err:
+#         print(f"   WARNING: Could not load SD sheet {_sd_id}: {_sd_err}")
+
+# if not _sd_frames:
+#     raise RuntimeError("No cumulative disposition sheets could be loaded.")
+# df_sd = pd.concat(_sd_frames, ignore_index=True)
 # df_sd.columns = df_sd.columns.str.strip()
 # if SD_ADDED_BY not in df_sd.columns:
 #     raise KeyError(f"'{SD_ADDED_BY}' column missing.")
@@ -1073,51 +1114,257 @@
 #     return sr
 
 
-# # ── v21: Write Lead Summary Report to Google Sheet ────────────────────────────
-# def write_summary_to_gsheet(gc, summary_today, summary_overall, today_str):
+# # ── v21 enhanced: Rich formatted output to Google Sheet ──────────────────────
+# def write_summary_to_gsheet(
+#     gc, summary_today, summary_overall, today_str,
+#     t_aiq_all, t_aiq_win, t_aiq_ttc_unc, t_aiq_ttc, t_aiq_renewal_ttc,
+#     t_plan_rev
+# ):
 #     """
-#     Clear the first sheet of OUTPUT_SUMMARY_SHEET_ID and write:
-#       - Today's Summary  (4 campaign rows + Grand Total)
-#       - Overall Summary  (4 campaign rows + Grand Total)
-#     Columns follow SUMMARY_METRIC_COLS order (Segment first).
-#     All values are plain scalars — no formatting.
+#     Writes a richly formatted Lead Summary Report to OUTPUT_SUMMARY_SHEET_ID (gid=0):
+#       Block 1: Today's Summary  — navy title, blue headers, segment colors, amber GT
+#       Block 2: Overall Summary  — same formatting
+#       Block 3: 5 AI Qual Funnels side-by-side (display-name labels, alternating rows)
+#       Block 4: Plan-wise Revenue (non-zero only, sorted by revenue desc)
+#     Font: Lexend throughout.
 #     """
-#     DISPLAY_COLS = ["Segment"] + SUMMARY_METRIC_COLS
+#     def _rgb(h):
+#         h = h.lstrip("#")
+#         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+#         return {"red": r / 255.0, "green": g / 255.0, "blue": b / 255.0}
 
-#     def row_to_list(row_dict):
-#         return [row_dict.get(col, "") for col in DISPLAY_COLS]
+#     NAVY, WHITE, BLUE_H = "1B2A4A", "FFFFFF", "2E75B6"
+#     AMBER = "F4B942"
+#     SEG_C = {
+#         WINBACK_DISPLAY:     "E8F4FD",
+#         TTC_UNC_DISPLAY:     "FEF9E7",
+#         TTC_DISPLAY:         "EDE7F6",
+#         RENEWAL_TTC_DISPLAY: "E8F8E8",
+#     }
+#     F_TITLE = "1565C0"; F_COL = "1976D2"; F_ALT = "E3F2FD"; F_GT = "BBDEFB"
+#     P_TITLE = "1B2A4A"; P_COL  = "37474F"; P_ALT = "F1F8E9"; P_GT = "C8E6C9"
+#     FONT = "Lexend"
+
+#     DISP_COLS = ["Segment"] + SUMMARY_METRIC_COLS
+#     N_SUM     = len(DISP_COLS)   # 14 cols A-N
+#     TOTAL_W   = 19               # A-S for funnels
 
 #     gt_today   = build_grand_total_row(summary_today)
 #     gt_overall = build_grand_total_row(summary_overall)
 
-#     data = []
+#     def rv(d): return [d.get(c, "") for c in DISP_COLS]
+#     def pad(row, w=TOTAL_W): return (list(row) + [""] * w)[:w]
 
-#     # ── Today's Summary ──────────────────────────────────────────────────────
-#     title_today = [f"Today's Summary ({today_str})"] + [""] * (len(DISPLAY_COLS) - 1)
-#     data.append(title_today)
-#     data.append(DISPLAY_COLS)
-#     for row in summary_today:
-#         data.append(row_to_list(row))
-#     data.append(row_to_list(gt_today))   # Grand Total
+#     reqs = []
 
-#     data.append([""] * len(DISPLAY_COLS))   # blank separator
+#     def fmt(r1, r2, c1, c2, bg=None, fg="000000", bold=False,
+#             size=10, align="CENTER", valign="MIDDLE"):
+#         cell_fmt = {
+#             "textFormat": {
+#                 "fontFamily": FONT, "fontSize": size, "bold": bold,
+#                 "foregroundColor": _rgb(fg),
+#             },
+#             "horizontalAlignment": align,
+#             "verticalAlignment": valign,
+#         }
+#         if bg: cell_fmt["backgroundColor"] = _rgb(bg)
+#         reqs.append({
+#             "repeatCell": {
+#                 "range": {"sheetId": 0,
+#                           "startRowIndex": r1, "endRowIndex": r2,
+#                           "startColumnIndex": c1, "endColumnIndex": c2},
+#                 "cell": {"userEnteredFormat": cell_fmt},
+#                 "fields": ("userEnteredFormat(backgroundColor,textFormat,"
+#                            "horizontalAlignment,verticalAlignment)"),
+#             }
+#         })
 
-#     # ── Overall Summary ──────────────────────────────────────────────────────
-#     title_overall = ["Overall Summary (All Dates)"] + [""] * (len(DISPLAY_COLS) - 1)
-#     data.append(title_overall)
-#     data.append(DISPLAY_COLS)
-#     for row in summary_overall:
-#         data.append(row_to_list(row))
-#     data.append(row_to_list(gt_overall))  # Grand Total
+#     def merge(r1, r2, c1, c2):
+#         reqs.append({
+#             "mergeCells": {
+#                 "range": {"sheetId": 0,
+#                           "startRowIndex": r1, "endRowIndex": r2,
+#                           "startColumnIndex": c1, "endColumnIndex": c2},
+#                 "mergeType": "MERGE_ALL",
+#             }
+#         })
 
-#     # ── Write to sheet ───────────────────────────────────────────────────────
-#     sh  = gc.open_by_key(OUTPUT_SUMMARY_SHEET_ID)
-#     ws  = sh.get_worksheet(0)   # gid=0
+#     def row_h(ri, h):
+#         reqs.append({
+#             "updateDimensionProperties": {
+#                 "range": {"sheetId": 0, "dimension": "ROWS",
+#                           "startIndex": ri, "endIndex": ri + 1},
+#                 "properties": {"pixelSize": h}, "fields": "pixelSize",
+#             }
+#         })
+
+#     def col_w(ci, w):
+#         reqs.append({
+#             "updateDimensionProperties": {
+#                 "range": {"sheetId": 0, "dimension": "COLUMNS",
+#                           "startIndex": ci, "endIndex": ci + 1},
+#                 "properties": {"pixelSize": w}, "fields": "pixelSize",
+#             }
+#         })
+
+#     grid = []
+#     _r   = [0]
+
+#     def add_row(values):
+#         grid.append(pad(values))
+#         r = _r[0]; _r[0] += 1
+#         return r
+
+#     # ═══ BLOCK 1: Today's Summary ═══════════════════════════════════════════
+#     r = add_row([f"Today's Summary ({today_str})"])
+#     fmt(r, r+1, 0, N_SUM, bg=NAVY, fg=WHITE, bold=True, size=11, align="LEFT")
+#     merge(r, r+1, 0, N_SUM); row_h(r, 28)
+
+#     r = add_row(DISP_COLS)
+#     fmt(r, r+1, 0, N_SUM, bg=BLUE_H, fg=WHITE, bold=True)
+#     fmt(r, r+1, 0, 1, bg=BLUE_H, fg=WHITE, bold=True, align="LEFT")
+#     row_h(r, 24)
+
+#     for row_d in summary_today:
+#         seg = row_d["Segment"]; bg = SEG_C.get(seg, "FFFFFF")
+#         r = add_row(rv(row_d))
+#         fmt(r, r+1, 0, 1, bg=bg, align="LEFT")
+#         fmt(r, r+1, 1, N_SUM, bg=bg)
+#         row_h(r, 22)
+
+#     r = add_row(rv(gt_today))
+#     fmt(r, r+1, 0, 1, bg=AMBER, bold=True, align="LEFT")
+#     fmt(r, r+1, 1, N_SUM, bg=AMBER, bold=True)
+#     row_h(r, 24)
+
+#     r = add_row([]); row_h(r, 10)
+
+#     # ═══ BLOCK 2: Overall Summary ════════════════════════════════════════════
+#     r = add_row(["Overall Summary (All Dates)"])
+#     fmt(r, r+1, 0, N_SUM, bg=NAVY, fg=WHITE, bold=True, size=11, align="LEFT")
+#     merge(r, r+1, 0, N_SUM); row_h(r, 28)
+
+#     r = add_row(DISP_COLS)
+#     fmt(r, r+1, 0, N_SUM, bg=BLUE_H, fg=WHITE, bold=True)
+#     fmt(r, r+1, 0, 1, bg=BLUE_H, fg=WHITE, bold=True, align="LEFT")
+#     row_h(r, 24)
+
+#     for row_d in summary_overall:
+#         seg = row_d["Segment"]; bg = SEG_C.get(seg, "FFFFFF")
+#         r = add_row(rv(row_d))
+#         fmt(r, r+1, 0, 1, bg=bg, align="LEFT")
+#         fmt(r, r+1, 1, N_SUM, bg=bg)
+#         row_h(r, 22)
+
+#     r = add_row(rv(gt_overall))
+#     fmt(r, r+1, 0, 1, bg=AMBER, bold=True, align="LEFT")
+#     fmt(r, r+1, 1, N_SUM, bg=AMBER, bold=True)
+#     row_h(r, 24)
+
+#     r = add_row([]); row_h(r, 10)
+
+#     # ═══ BLOCK 3: AI Qual Funnels (5 side-by-side) ═══════════════════════════
+#     funnel_tables = [
+#         ("Overall AI Qual Funnel",             t_aiq_all),
+#         ("Winback AI Qual Funnel",              t_aiq_win),
+#         (f"{TTC_UNC_DISPLAY} AI Qual Funnel",  t_aiq_ttc_unc),
+#         (f"{TTC_DISPLAY} AI Qual Funnel",       t_aiq_ttc),
+#         ("Renewal_TTC AI Qual Funnel",          t_aiq_renewal_ttc),
+#     ]
+#     F_OFF = [0, 4, 8, 12, 16]
+
+#     max_df_rows  = max(len(df) for _, df in funnel_tables)
+#     total_f_rows = 2 + max_df_rows   # title + col-hdr + data
+
+#     f_start = _r[0]
+#     for _ in range(total_f_rows):
+#         add_row([])
+
+#     for tbl_i, (tbl_title, tbl_df) in enumerate(funnel_tables):
+#         off = F_OFF[tbl_i]
+
+#         r = f_start
+#         grid[r][off] = tbl_title
+#         fmt(r, r+1, off, off+3, bg=F_TITLE, fg=WHITE, bold=True, size=10, align="LEFT")
+#         merge(r, r+1, off, off+3)
+#         if tbl_i == 0: row_h(r, 26)
+
+#         r = f_start + 1
+#         grid[r][off] = "LSQ Disposition"
+#         grid[r][off+1] = "Count"
+#         grid[r][off+2] = "%"
+#         fmt(r, r+1, off, off+3, bg=F_COL, fg=WHITE, bold=True)
+#         fmt(r, r+1, off, off+1, bg=F_COL, fg=WHITE, bold=True, align="LEFT")
+#         if tbl_i == 0: row_h(r, 22)
+
+#         for di, (_, drow) in enumerate(tbl_df.iterrows()):
+#             r = f_start + 2 + di
+#             disp  = str(drow.get("LSQ Disposition", ""))
+#             is_gt = (disp == "Grand Total")
+#             grid[r][off]   = disp
+#             grid[r][off+1] = int(drow["Count"]) if not is_gt and pd.notna(drow.get("Count")) else drow.get("Count", "")
+#             grid[r][off+2] = drow.get("%", "")
+#             bg   = F_GT if is_gt else (F_ALT if di % 2 else "FFFFFF")
+#             bold = is_gt
+#             fmt(r, r+1, off, off+3, bg=bg, bold=bold)
+#             fmt(r, r+1, off, off+1, bg=bg, bold=bold, align="LEFT")
+#             if tbl_i == 0: row_h(r, 20)
+
+#     r = add_row([]); row_h(r, 10)
+
+#     # ═══ BLOCK 4: Plan-wise Revenue ══════════════════════════════════════════
+#     r = add_row(["Plan-wise Revenue", "", ""])
+#     fmt(r, r+1, 0, 3, bg=P_TITLE, fg=WHITE, bold=True, size=11, align="LEFT")
+#     merge(r, r+1, 0, 3); row_h(r, 28)
+
+#     r = add_row(["Plan Name", "Revenue (Rs)", "Order Count"])
+#     fmt(r, r+1, 0, 3, bg=P_COL, fg=WHITE, bold=True)
+#     fmt(r, r+1, 0, 1, bg=P_COL, fg=WHITE, bold=True, align="LEFT")
+#     row_h(r, 22)
+
+#     for di, (_, pr) in enumerate(t_plan_rev.iterrows()):
+#         plan_n = str(pr.get("Plan Name", ""))
+#         is_gt  = (plan_n == "Grand Total")
+#         try:    rev_v = int(pr.get("Revenue (Rs)", 0))
+#         except: rev_v = pr.get("Revenue (Rs)", 0)
+#         try:    ord_v = int(pr.get("Order Count", 0))
+#         except: ord_v = pr.get("Order Count", 0)
+#         r = add_row([plan_n, rev_v, ord_v])
+#         bg = P_GT if is_gt else (P_ALT if di % 2 else "FFFFFF")
+#         fmt(r, r+1, 0, 3, bg=bg, bold=is_gt)
+#         fmt(r, r+1, 0, 1, bg=bg, bold=is_gt, align="LEFT")
+#         row_h(r, 20)
+
+#     # ── Column widths ─────────────────────────────────────────────────────────
+#     col_w(0, 155)
+#     for c in range(1, N_SUM): col_w(c, 88)
+#     for off in F_OFF:
+#         col_w(off + 1, 70); col_w(off + 2, 55)
+#     for off in [3, 7, 11, 15]: col_w(off, 12)
+
+#     # ── Write to Google Sheet ─────────────────────────────────────────────────
+#     sh = gc.open_by_key(OUTPUT_SUMMARY_SHEET_ID)
+#     ws = sh.get_worksheet(0)
 #     ws.clear()
-#     # Use append_rows after clear — works across all gspread versions
-#     ws.append_rows(data, value_input_option="USER_ENTERED")
+
+#     try:
+#         ws.update(range_name="A1", values=grid)
+#     except TypeError:
+#         ws.update("A1", grid)
+
+#     all_reqs = [{
+#         "unmergeCells": {
+#             "range": {"sheetId": 0,
+#                       "startRowIndex": 0, "endRowIndex": len(grid) + 5,
+#                       "startColumnIndex": 0, "endColumnIndex": TOTAL_W}
+#         }
+#     }] + reqs
+
+#     for i in range(0, len(all_reqs), 100):
+#         sh.batch_update({"requests": all_reqs[i:i + 100]})
+
 #     print(f"OK Lead Summary -> Google Sheet {OUTPUT_SUMMARY_SHEET_ID} "
-#           f"({len(data)} rows written to first tab)")
+#           f"({len(grid)} rows, {len(all_reqs)} format ops applied)")
 
 
 # # ── Build pivot tables ─────────────────────────────────────────────────────────
@@ -1773,7 +2020,11 @@
 # # ══════════════════════════════════════════════════════════════════════════════
 # # STEP 10 — Write Lead Summary Report to Google Sheet  (v21 new step)
 # # ══════════════════════════════════════════════════════════════════════════════
-# write_summary_to_gsheet(gc, summary_today, summary_overall, today_str)
+# write_summary_to_gsheet(
+#     gc, summary_today, summary_overall, today_str,
+#     t_aiq_all, t_aiq_win, t_aiq_ttc_unc, t_aiq_ttc, t_aiq_renewal_ttc,
+#     t_plan_rev
+# )
 
 
 # # ══════════════════════════════════════════════════════════════════════════════
@@ -1809,8 +2060,7 @@
 # print("\nDone!")
 # ==============================================================================
 #  Leads <-> Sales Activity Merger + Summary Report  (GitHub Actions)
-#  v21 -- GHA compat, Google Sheets output, Grand Total, whole numbers,
-#         reordered summary columns.
+#  v22 -- Added Broker segment (Campaign 5).
 # ==============================================================================
 # Changes from v20:
 #  (1) SUMMARY_METRIC_COLS reordered to:
@@ -1842,7 +2092,7 @@
 #   - name: Run leads merger
 #     env:
 #       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-#     run: python leads_merger_v21.py
+#     run: python leads_merger_v22.py
 # ==============================================================================
 
 import re, json, os
@@ -1864,27 +2114,33 @@ TTC_TAB_NAME      = "TTC"
 UNCALLED_TAB_NAME = "Uncalled"
 TTC_SOURCE        = "TTC"
 
-# WINBACK_TAB_NAME  = "Winback"
-WINBACK_SOURCE    = "Winback"
+WINBACK_SOURCE = "Winback"
 WINBACK_SHEETS = [
-    (CALLER_AI_SHEET_ID, "Winback"),              # original sheet — existing data
-    ("1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ", "Winback"), # new overflow sheet — add tab name too
+    (CALLER_AI_SHEET_ID,                             "Winback"),
+    ("1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ", "Winback"),
 ]
 
 RENEWAL_TTC_TAB_NAME = "Renewal_TTC"
 RENEWAL_TTC_SOURCE   = "Renewal_TTC"
+
+# v22: Broker (Campaign 5)
+BROKER_SHEET_ID = "1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ"
+BROKER_TAB_NAME = "Broker"
+BROKER_SOURCE   = "Broker"
+BROKER_DISPLAY  = "Broker"
 
 WINBACK_DISPLAY      = "Winback"
 TTC_UNC_DISPLAY      = "TTC+Uncalled (Set 1)"
 TTC_DISPLAY          = "TTC+Uncalled (SET2)"
 RENEWAL_TTC_DISPLAY  = "Renewal_TTC"
 
-# v20: tiebreak order when all disposition/confidence/date signals are equal
+# v22: BROKER_SOURCE added at position 4
 CAMP_CONCAT_ORDER = {
-    TTC_UNC_SOURCE:    0,
-    TTC_SOURCE:        1,
-    WINBACK_SOURCE:    2,
+    TTC_UNC_SOURCE:     0,
+    TTC_SOURCE:         1,
+    WINBACK_SOURCE:     2,
     RENEWAL_TTC_SOURCE: 3,
+    BROKER_SOURCE:      4,
 }
 
 OUTPUT_TAB_GID           = 1114202623
@@ -1933,14 +2189,10 @@ OUTPUT_LOCAL         = OUTPUT_DIR / "Leads_Final_Output.csv"
 SUMMARY_LOCAL        = OUTPUT_DIR / "Leads_Summary_Report.xlsx"
 SUMMARY_MATRIX_LOCAL = OUTPUT_DIR / "Leads_Summary_Matrix.xlsx"
 
-# SD_SHEET_ID    = "1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E"
-# SD_SHEET_GID   = 758486581
-# All cumulative disposition sheets — keep in sync with DISPOSITION_CUMULATIVE_SHEET_IDS in ozontel.py
-# Format: (sheet_id, gid)  — Sheet 1 uses specific gid; overflow sheets use gid=0 (first tab)
+# v22: SD_SHEETS replaces SD_SHEET_ID / SD_SHEET_GID
 SD_SHEETS = [
-    ("1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E", 758486581),  # Sheet 1 — original
-    ("1Qt-n-QYnDykALFjYphDIIXdhOFbd7_ppqr6ZhmvXpNo",0)
-    # ("PASTE_CUMULATIVE_SHEET_2_ID_HERE", 0),                      # Sheet 2 — add when you create it
+    ("1Zf3GLNtI5nLsOfa8EBISqvYezhqgbAEuB6dR2isB4_E", 758486581),
+    ("1Qt-n-QYnDykALFjYphDIIXdhOFbd7_ppqr6ZhmvXpNo",  0),
 ]
 SD_PHONE_COL   = "Phone Number"
 SD_DATE_COL    = "Activity Date"
@@ -1999,12 +2251,14 @@ SUMMARY_METRIC_COLS = [
     "AI Unqual & Paid Rev",
 ]
 
+# v22: 13 cols — added Broker Revenue / Broker Orders
 PLAN_COLS = [
     "Plan Name", "Total Revenue (Rs)", "Total Orders",
     "Winback Revenue",     "Winback Orders",
     "TTC+Unc Revenue",     "TTC+Unc Orders",
     "TTC Revenue",         "TTC Orders",
     "Renewal TTC Revenue", "Renewal TTC Orders",
+    "Broker Revenue",      "Broker Orders",
 ]
 
 # v21: Target Google Sheet for Lead Summary Report
@@ -2042,12 +2296,15 @@ def is_test_payment(plan_name):
         return True
     return pn in {n.strip().lower() for n in TEST_PAYMENT_PLAN_NAMES}
 
+# v22: includes Broker
 def src_count_str(df):
     w  = int((df["Source"] == WINBACK_SOURCE).sum())     if "Source" in df.columns else 0
     tu = int((df["Source"] == TTC_UNC_SOURCE).sum())     if "Source" in df.columns else 0
     t  = int((df["Source"] == TTC_SOURCE).sum())         if "Source" in df.columns else 0
     r  = int((df["Source"] == RENEWAL_TTC_SOURCE).sum()) if "Source" in df.columns else 0
-    return f"Winback: {w}  |  TTC+Unc: {tu}  |  TTC: {t}  |  Renewal_TTC: {r}"
+    b  = int((df["Source"] == BROKER_SOURCE).sum())      if "Source" in df.columns else 0
+    return (f"Winback: {w}  |  TTC+Unc: {tu}  |  TTC: {t}  |  "
+            f"Renewal_TTC: {r}  |  Broker: {b}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2074,7 +2331,7 @@ print("OK Auth done (service account)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — Load CallerAI Leads (4 campaigns)
+# STEP 2 — Load CallerAI Leads (4 campaigns) + Broker (Campaign 5)
 # ══════════════════════════════════════════════════════════════════════════════
 sh_caller = gc.open_by_key(CALLER_AI_SHEET_ID)
 tabs_map  = {ws.title: ws for ws in sh_caller.worksheets()}
@@ -2103,24 +2360,20 @@ print(f"   TTC merged raw: {len(df_ttc_raw):,}  "
       f"({TTC_TAB_NAME}: {len(df_ttc_tab):,} + {UNCALLED_TAB_NAME}: {len(df_unc_tab):,})")
 
 print("\n-- Campaign 3: Winback (single tab) -------------------------------------")
-# df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_TAB_NAME)
-# AFTER:
-print(f"\n-- Campaign 3: Winback (merging {len(WINBACK_SHEETS)} sheets) -------------")
-_win_frames = []
-for _wb_sid, _wb_tab in WINBACK_SHEETS:
-    try:
-        _wb_sh   = gc.open_by_key(_wb_sid)
-        _wb_tabs = {ws.title: ws for ws in _wb_sh.worksheets()}
-        _wb_df   = gsheet_tab_to_df(_wb_tabs, _wb_tab)
-        _win_frames.append(_wb_df)
-    except Exception as _wb_err:
-        print(f"   WARNING: Could not load Winback sheet {_wb_sid}: {_wb_err}")
-df_win_raw = pd.concat([f for f in _win_frames if not f.empty], ignore_index=True)
-print(f"   Winback merged raw: {len(df_win_raw):,}  "
-      + "  |  ".join(f"{t}: {len(f):,}" for (_,t), f in zip(WINBACK_SHEETS, _win_frames)))
+df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_SHEETS[0][1])
 
 print("\n-- Campaign 4: Renewal_TTC (single tab) ---------------------------------")
 df_renewal_ttc_raw = gsheet_tab_to_df(tabs_map, RENEWAL_TTC_TAB_NAME)
+
+print("\n-- Campaign 5: Broker (separate sheet, 'Broker' tab) --------------------")
+try:
+    _brk_sh       = gc.open_by_key(BROKER_SHEET_ID)
+    _brk_tabs     = {ws.title: ws for ws in _brk_sh.worksheets()}
+    df_broker_raw = gsheet_tab_to_df(_brk_tabs, BROKER_TAB_NAME)
+    print(f"   Broker sheet tabs: {list(_brk_tabs.keys())}")
+except Exception as _brk_err:
+    print(f"   WARNING: Could not load Broker sheet: {_brk_err}")
+    df_broker_raw = pd.DataFrame()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2193,13 +2446,15 @@ df_ttc_unc     = process_tab(df_ttc_unc_raw,     TTC_UNC_SOURCE)
 df_ttc         = process_tab(df_ttc_raw,         TTC_SOURCE)
 df_win         = process_tab(df_win_raw,         WINBACK_SOURCE)
 df_renewal_ttc = process_tab(df_renewal_ttc_raw, RENEWAL_TTC_SOURCE)
+df_broker      = process_tab(df_broker_raw,      BROKER_SOURCE)
 
-leads_raw = pd.concat([df_ttc_unc, df_ttc, df_win, df_renewal_ttc], ignore_index=True)
+leads_raw = pd.concat([df_ttc_unc, df_ttc, df_win, df_renewal_ttc, df_broker], ignore_index=True)
 print(f"\nOK Combined -- total: {len(leads_raw):,}  |  "
       f"{TTC_UNC_SOURCE}: {len(df_ttc_unc):,}  |  "
       f"{TTC_SOURCE}: {len(df_ttc):,}  |  "
       f"{WINBACK_SOURCE}: {len(df_win):,}  |  "
-      f"{RENEWAL_TTC_SOURCE}: {len(df_renewal_ttc):,}")
+      f"{RENEWAL_TTC_SOURCE}: {len(df_renewal_ttc):,}  |  "
+      f"{BROKER_SOURCE}: {len(df_broker):,}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2269,29 +2524,23 @@ print(f"OK Paid sheet -- unique paid: {len(paid_set):,}  |  today: {len(paid_set
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 4 — LSQ Sales Disposition
+# STEP 4 — LSQ Sales Disposition (v22: load from SD_SHEETS list)
 # ══════════════════════════════════════════════════════════════════════════════
-# _disp_url = (f"https://docs.google.com/spreadsheets/d/{SD_SHEET_ID}"
-#              f"/export?format=csv&gid={SD_SHEET_GID}")
-# df_sd = pd.read_csv(_disp_url, low_memory=False)
-_sd_frames = []
+_sd_dfs = []
 for _sd_id, _sd_gid in SD_SHEETS:
-    _disp_url = (f"https://docs.google.com/spreadsheets/d/{_sd_id}"
-                 f"/export?format=csv&gid={_sd_gid}")
     try:
-        _df_chunk = pd.read_csv(_disp_url, low_memory=False)
-        _df_chunk.columns = _df_chunk.columns.str.strip()
-        _sd_frames.append(_df_chunk)
-        print(f"   Loaded SD sheet {_sd_id}: {len(_df_chunk):,} rows")
-    except Exception as _sd_err:
-        print(f"   WARNING: Could not load SD sheet {_sd_id}: {_sd_err}")
-
-if not _sd_frames:
-    raise RuntimeError("No cumulative disposition sheets could be loaded.")
-df_sd = pd.concat(_sd_frames, ignore_index=True)
+        _sd_url  = (f"https://docs.google.com/spreadsheets/d/{_sd_id}"
+                    f"/export?format=csv&gid={_sd_gid}")
+        _df_part = pd.read_csv(_sd_url, low_memory=False)
+        _df_part.columns = _df_part.columns.str.strip()
+        print(f"   SD sheet {_sd_id} gid={_sd_gid}: {len(_df_part):,} rows")
+        _sd_dfs.append(_df_part)
+    except Exception as _sd_e:
+        print(f"   WARNING SD sheet {_sd_id} gid={_sd_gid}: {_sd_e}")
+df_sd = pd.concat(_sd_dfs, ignore_index=True) if _sd_dfs else pd.DataFrame()
 df_sd.columns = df_sd.columns.str.strip()
 if SD_ADDED_BY not in df_sd.columns:
-    raise KeyError(f"'{SD_ADDED_BY}' column missing.")
+    raise KeyError(f"'{SD_ADDED_BY}' column missing in Sales Disposition sheets.")
 
 df_sd["_act_date"]    = pd.to_datetime(df_sd[SD_DATE_COL], dayfirst=True, errors="coerce")
 df_sd = df_sd[df_sd["_act_date"] >= pd.Timestamp(SD_FILTER_FROM)].copy()
@@ -2377,7 +2626,8 @@ print(f"   CallerAI Qualified (excl. Paid): "
 print(f"   {TTC_UNC_SOURCE}: {(out['Source']==TTC_UNC_SOURCE).sum():,}  |  "
       f"{TTC_SOURCE}: {(out['Source']==TTC_SOURCE).sum():,}  |  "
       f"{WINBACK_SOURCE}: {(out['Source']==WINBACK_SOURCE).sum():,}  |  "
-      f"{RENEWAL_TTC_SOURCE}: {(out['Source']==RENEWAL_TTC_SOURCE).sum():,}")
+      f"{RENEWAL_TTC_SOURCE}: {(out['Source']==RENEWAL_TTC_SOURCE).sum():,}  |  "
+      f"{BROKER_SOURCE}: {(out['Source']==BROKER_SOURCE).sum():,}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2435,7 +2685,8 @@ if _rev_owner:
     print(f"OK Revenue attribution -- {len(_rev_owner):,} paid phones attributed  |  "
           + "  |  ".join(
               f"{src}: {_attr_counts.get(src, 0)}"
-              for src in [TTC_UNC_SOURCE, TTC_SOURCE, WINBACK_SOURCE, RENEWAL_TTC_SOURCE])
+              for src in [TTC_UNC_SOURCE, TTC_SOURCE, WINBACK_SOURCE,
+                          RENEWAL_TTC_SOURCE, BROKER_SOURCE])
           + f"  |  Total attributed Rs: {_attr_total_rev:,.0f}")
 
 # Per-campaign DFs (built AFTER Revenue_Attributed so they inherit the column)
@@ -2443,12 +2694,14 @@ out_ttc_unc     = out_all[out_all["Source"] == TTC_UNC_SOURCE].copy()
 out_ttc         = out_all[out_all["Source"] == TTC_SOURCE].copy()
 out_win         = out_all[out_all["Source"] == WINBACK_SOURCE].copy()
 out_renewal_ttc = out_all[out_all["Source"] == RENEWAL_TTC_SOURCE].copy()
+out_broker      = out_all[out_all["Source"] == BROKER_SOURCE].copy()
 
 # Today's per-campaign DFs
 out_ttc_unc_today     = out_ttc_unc    [out_ttc_unc    ["_date_ts"] == today_ts].copy()
 out_ttc_today         = out_ttc        [out_ttc        ["_date_ts"] == today_ts].copy()
 out_win_today         = out_win        [out_win        ["_date_ts"] == today_ts].copy()
 out_renewal_ttc_today = out_renewal_ttc[out_renewal_ttc["_date_ts"] == today_ts].copy()
+out_broker_today      = out_broker     [out_broker     ["_date_ts"] == today_ts].copy()
 
 
 # ── build_summary_row ─────────────────────────────────────────────────────────
@@ -2537,17 +2790,20 @@ def build_grand_total_row(rows):
     }
 
 
+# v22: 5 rows each (added Broker)
 summary_today = [
     build_summary_row(out_win_today,         WINBACK_DISPLAY,     today_paid_set=paid_set_today),
     build_summary_row(out_ttc_unc_today,     TTC_UNC_DISPLAY,     today_paid_set=paid_set_today),
     build_summary_row(out_ttc_today,         TTC_DISPLAY,         today_paid_set=paid_set_today),
     build_summary_row(out_renewal_ttc_today, RENEWAL_TTC_DISPLAY, today_paid_set=paid_set_today),
+    build_summary_row(out_broker_today,      BROKER_DISPLAY,      today_paid_set=paid_set_today),
 ]
 summary_overall = [
     build_summary_row(out_win,         WINBACK_DISPLAY),
     build_summary_row(out_ttc_unc,     TTC_UNC_DISPLAY),
     build_summary_row(out_ttc,         TTC_DISPLAY),
     build_summary_row(out_renewal_ttc, RENEWAL_TTC_DISPLAY),
+    build_summary_row(out_broker,      BROKER_DISPLAY),
 ]
 
 
@@ -2690,30 +2946,36 @@ def plan_by_segment(df):
     return {plan: {"revenue": float(row["revenue"]), "count": int(row["count"])}
             for plan, row in grp.iterrows()}
 
-def build_planwise_rows(df_win, df_ttc_unc, df_ttc, df_renewal_ttc):
+# v22: 5-arg version (adds df_broker)
+def build_planwise_rows(df_win, df_ttc_unc, df_ttc, df_renewal_ttc, df_broker):
     p_win = plan_by_segment(df_win)
     p_unc = plan_by_segment(df_ttc_unc)
     p_ttc = plan_by_segment(df_ttc)
     p_ren = plan_by_segment(df_renewal_ttc)
-    all_plans = sorted(set(list(p_win) + list(p_unc) + list(p_ttc) + list(p_ren)))
+    p_bro = plan_by_segment(df_broker)
+    all_plans = sorted(set(list(p_win)+list(p_unc)+list(p_ttc)+list(p_ren)+list(p_bro)))
     rows = []
     for plan in all_plans:
         w = p_win.get(plan, {"revenue": 0, "count": 0})
         u = p_unc.get(plan, {"revenue": 0, "count": 0})
         t = p_ttc.get(plan, {"revenue": 0, "count": 0})
         r = p_ren.get(plan, {"revenue": 0, "count": 0})
+        b = p_bro.get(plan, {"revenue": 0, "count": 0})
         rows.append([plan,
-                     w["revenue"] + u["revenue"] + t["revenue"] + r["revenue"],
-                     w["count"]   + u["count"]   + t["count"]   + r["count"],
+                     w["revenue"]+u["revenue"]+t["revenue"]+r["revenue"]+b["revenue"],
+                     w["count"]  +u["count"]  +t["count"]  +r["count"]  +b["count"],
                      w["revenue"], w["count"], u["revenue"], u["count"],
-                     t["revenue"], t["count"], r["revenue"], r["count"]])
-    tr_w = sum(v["revenue"] for v in p_win.values()); tc_w = sum(v["count"] for v in p_win.values())
-    tr_u = sum(v["revenue"] for v in p_unc.values()); tc_u = sum(v["count"] for v in p_unc.values())
-    tr_t = sum(v["revenue"] for v in p_ttc.values()); tc_t = sum(v["count"] for v in p_ttc.values())
-    tr_r = sum(v["revenue"] for v in p_ren.values()); tc_r = sum(v["count"] for v in p_ren.values())
+                     t["revenue"], t["count"], r["revenue"], r["count"],
+                     b["revenue"], b["count"]])
+    tr_w=sum(v["revenue"] for v in p_win.values()); tc_w=sum(v["count"] for v in p_win.values())
+    tr_u=sum(v["revenue"] for v in p_unc.values()); tc_u=sum(v["count"] for v in p_unc.values())
+    tr_t=sum(v["revenue"] for v in p_ttc.values()); tc_t=sum(v["count"] for v in p_ttc.values())
+    tr_r=sum(v["revenue"] for v in p_ren.values()); tc_r=sum(v["count"] for v in p_ren.values())
+    tr_b=sum(v["revenue"] for v in p_bro.values()); tc_b=sum(v["count"] for v in p_bro.values())
     rows.append(["Grand Total",
-                 tr_w + tr_u + tr_t + tr_r, tc_w + tc_u + tc_t + tc_r,
-                 tr_w, tc_w, tr_u, tc_u, tr_t, tc_t, tr_r, tc_r])
+                 tr_w+tr_u+tr_t+tr_r+tr_b, tc_w+tc_u+tc_t+tc_r+tc_b,
+                 tr_w, tc_w, tr_u, tc_u, tr_t, tc_t, tr_r, tc_r,
+                 tr_b, tc_b])
     return rows
 
 
@@ -2728,6 +2990,7 @@ WIN_FILL            = PatternFill("solid", fgColor="E8F4FD")
 TTC_UNC_FILL        = PatternFill("solid", fgColor="FEF9E7")
 TTC_FILL            = PatternFill("solid", fgColor="EDE7F6")
 RENEWAL_TTC_FILL    = PatternFill("solid", fgColor="E8F8E8")
+BROKER_FILL         = PatternFill("solid", fgColor="FDEBD0")   # v22 peach
 ANS_COL_FILL        = PatternFill("solid", fgColor="E8F5E9")
 OUR_ANS_FILL        = PatternFill("solid", fgColor="C8E6C9")
 EMPTY_ROW_FILL      = PatternFill("solid", fgColor="F5F5F5")
@@ -2743,10 +3006,12 @@ seg_fills = {
     TTC_UNC_SOURCE:      TTC_UNC_FILL,
     TTC_SOURCE:          TTC_FILL,
     RENEWAL_TTC_SOURCE:  RENEWAL_TTC_FILL,
+    BROKER_SOURCE:       BROKER_FILL,       # v22
     WINBACK_DISPLAY:     WIN_FILL,
     TTC_UNC_DISPLAY:     TTC_UNC_FILL,
     TTC_DISPLAY:         TTC_FILL,
     RENEWAL_TTC_DISPLAY: RENEWAL_TTC_FILL,
+    BROKER_DISPLAY:      BROKER_FILL,       # v22
 }
 
 def _cell(ws, r, c, value, bold=False, fill=None, align="center", color="000000"):
@@ -2926,6 +3191,7 @@ def write_planwise_block(ws, title, data_rows, start_row, start_col):
 def write_summary_to_gsheet(
     gc, summary_today, summary_overall, today_str,
     t_aiq_all, t_aiq_win, t_aiq_ttc_unc, t_aiq_ttc, t_aiq_renewal_ttc,
+    t_aiq_broker,   # v22
     t_plan_rev
 ):
     """
@@ -2948,6 +3214,7 @@ def write_summary_to_gsheet(
         TTC_UNC_DISPLAY:     "FEF9E7",
         TTC_DISPLAY:         "EDE7F6",
         RENEWAL_TTC_DISPLAY: "E8F8E8",
+        BROKER_DISPLAY:      "FDEBD0",   # v22
     }
     F_TITLE = "1565C0"; F_COL = "1976D2"; F_ALT = "E3F2FD"; F_GT = "BBDEFB"
     P_TITLE = "1B2A4A"; P_COL  = "37474F"; P_ALT = "F1F8E9"; P_GT = "C8E6C9"
@@ -2955,7 +3222,7 @@ def write_summary_to_gsheet(
 
     DISP_COLS = ["Segment"] + SUMMARY_METRIC_COLS
     N_SUM     = len(DISP_COLS)   # 14 cols A-N
-    TOTAL_W   = 19               # A-S for funnels
+    TOTAL_W   = 24               # v22: A-X for 6 funnels
 
     gt_today   = build_grand_total_row(summary_today)
     gt_overall = build_grand_total_row(summary_overall)
@@ -3078,8 +3345,9 @@ def write_summary_to_gsheet(
         (f"{TTC_UNC_DISPLAY} AI Qual Funnel",  t_aiq_ttc_unc),
         (f"{TTC_DISPLAY} AI Qual Funnel",       t_aiq_ttc),
         ("Renewal_TTC AI Qual Funnel",          t_aiq_renewal_ttc),
+        ("Broker AI Qual Funnel",               t_aiq_broker),   # v22
     ]
-    F_OFF = [0, 4, 8, 12, 16]
+    F_OFF = [0, 4, 8, 12, 16, 20]   # v22: +20
 
     max_df_rows  = max(len(df) for _, df in funnel_tables)
     total_f_rows = 2 + max_df_rows   # title + col-hdr + data
@@ -3148,7 +3416,7 @@ def write_summary_to_gsheet(
     for c in range(1, N_SUM): col_w(c, 88)
     for off in F_OFF:
         col_w(off + 1, 70); col_w(off + 2, 55)
-    for off in [3, 7, 11, 15]: col_w(off, 12)
+    for off in [3, 7, 11, 15, 19]: col_w(off, 12)   # v22: +19
 
     # ── Write to Google Sheet ─────────────────────────────────────────────────
     sh = gc.open_by_key(OUTPUT_SUMMARY_SHEET_ID)
@@ -3188,6 +3456,8 @@ t_aiq_win         = ai_qualified_funnel_pivot(out_win)
 t_aiq_ttc_unc     = ai_qualified_funnel_pivot(out_ttc_unc)
 t_aiq_ttc         = ai_qualified_funnel_pivot(out_ttc)
 t_aiq_renewal_ttc = ai_qualified_funnel_pivot(out_renewal_ttc)
+t_broker_c        = campaign_pivot(out_broker)            # v22
+t_aiq_broker      = ai_qualified_funnel_pivot(out_broker) # v22
 t_aiq_today       = ai_qualified_funnel_pivot(out_all[out_all["_date_ts"] == today_ts])
 
 t_plan_rev       = plan_revenue_pivot(out_all)
@@ -3210,7 +3480,8 @@ nr_2 = write_ai_qual_funnel_table(wsum, "Winback AI Qual Funnel",      t_aiq_win
 nr_3 = write_ai_qual_funnel_table(wsum, "TTC+Uncalled AI Qual Funnel", t_aiq_ttc_unc,     gap0, 9)
 nr_4 = write_ai_qual_funnel_table(wsum, "TTC AI Qual Funnel",          t_aiq_ttc,         gap0, 13)
 nr_5 = write_ai_qual_funnel_table(wsum, "Renewal_TTC AI Qual Funnel",  t_aiq_renewal_ttc, gap0, 17)
-gap1 = max(nr_1, nr_2, nr_3, nr_4, nr_5) + 2
+nr_6 = write_ai_qual_funnel_table(wsum, "Broker AI Qual Funnel",       t_aiq_broker,      gap0, 21)  # v22
+gap1 = max(nr_1, nr_2, nr_3, nr_4, nr_5, nr_6) + 2
 
 nr_l = write_campaign_table(wsum,     "Overall Leads",     t1,         gap1, 1)
 nr_r = write_plan_revenue_table(wsum, "Plan-wise Revenue", t_plan_rev, gap1, 9)
@@ -3220,7 +3491,8 @@ nr_l = write_campaign_table(wsum, "Winback Leads",      t_win_c,         gap2, 1
 nr_m = write_campaign_table(wsum, "TTC+Uncalled Leads", t_ttc_unc_c,     gap2, 9)
 nr_r = write_campaign_table(wsum, "TTC Leads",          t_ttc_c,         gap2, 17)
 nr_x = write_campaign_table(wsum, "Renewal_TTC Leads",  t_renewal_ttc_c, gap2, 25)
-gap3 = max(nr_l, nr_m, nr_r, nr_x) + 2
+nr_y = write_campaign_table(wsum, "Broker Leads",       t_broker_c,      gap2, 33)  # v22
+gap3 = max(nr_l, nr_m, nr_r, nr_x, nr_y) + 2
 
 nr_l = write_date_table(wsum,           "Week to Date",                 t_wtd,       gap3, 1)
 nr_r = write_ai_qual_funnel_table(wsum, f"Today AI Qual ({today_str})", t_aiq_today, gap3, 13)
@@ -3232,7 +3504,8 @@ write_plan_revenue_table(wsum, f"Today's Plan Revenue ({today_str})", t_plan_rev
 for col, w in {"A": 22, "B": 12, "C": 14, "D": 14, "E": 12, "F": 14, "G": 14, "H": 12,
                "I": 14, "J": 14, "K": 12, "L": 12, "M": 14, "N": 14, "O": 12, "P": 14,
                "Q": 14, "R": 14, "S": 14, "T": 14, "U": 14, "V": 14, "W": 14,
-               "X": 14, "Y": 14, "Z": 14, "AA": 14, "AB": 14, "AC": 14, "AD": 14}.items():
+               "X": 14, "Y": 14, "Z": 14, "AA": 14, "AB": 14, "AC": 14, "AD": 14,
+               "AE": 14, "AF": 14, "AG": 14, "AH": 14}.items():  # v22
     wsum.column_dimensions[col].width = w
 
 
@@ -3574,8 +3847,8 @@ def write_no_lsq_dispo_tab(wb, df, sheet_name="No LSQ Dispo Dump"):
     df_no["_qs"]   = df_no["CallerAI Qualified"].map({"Yes": 0, "No": 1}).fillna(1)
     df_no["_srcs"] = df_no["Source"].map({
         WINBACK_SOURCE: 0, TTC_UNC_SOURCE: 1,
-        TTC_SOURCE: 2,     RENEWAL_TTC_SOURCE: 3
-    }).fillna(4)
+        TTC_SOURCE: 2,     RENEWAL_TTC_SOURCE: 3, BROKER_SOURCE: 4   # v22
+    }).fillna(5)
     df_no.sort_values(["_qs", "_srcs", "Date"], inplace=True)
     df_no.drop(columns=["_qs", "_srcs"], inplace=True)
     df_no.reset_index(drop=True, inplace=True)
@@ -3632,6 +3905,8 @@ write_ai_qual_segment_tab(wb, "TTC AI Qual",         out_ttc,
                           "TTC -- AI Qualified Leads")
 write_ai_qual_segment_tab(wb, "Renewal TTC AI Qual", out_renewal_ttc,
                           "Renewal_TTC -- AI Qualified Leads")
+write_ai_qual_segment_tab(wb, "Broker AI Qual",      out_broker,        # v22
+                          "Broker -- AI Qualified Leads")
 write_ai_qual_segment_tab(wb, "Overall AI Qual",     out_all,
                           "Overall -- AI Qualified Leads (All Campaigns)")
 write_ai_answered_tab(wb, out_all, "AI Answered")
@@ -3644,6 +3919,8 @@ write_campaign_purchased_tab(wb, out_win,         "Winback Purchased",
                              "Winback -- Purchased Leads")
 write_campaign_purchased_tab(wb, out_renewal_ttc, "Renewal TTC Purchased",
                              "Renewal_TTC -- Purchased Leads")
+write_campaign_purchased_tab(wb, out_broker,      "Broker Purchased",      # v22
+                             "Broker -- Purchased Leads")
 
 write_no_lsq_dispo_tab(wb, out_all, "No LSQ Dispo Dump")
 
@@ -3660,6 +3937,7 @@ for seg_nm, seg_df in [
     (TTC_UNC_SOURCE,      out_ttc_unc),
     (TTC_SOURCE,          out_ttc),
     (RENEWAL_TTC_SOURCE,  out_renewal_ttc),
+    (BROKER_SOURCE,       out_broker),       # v22
     ("Overall",           out_all),
 ]:
     n_total = int((seg_df["CallerAI Qualified"] == "Yes").sum())
@@ -3702,16 +3980,20 @@ nr_4 = write_ai_qual_funnel_table(ws_s, "TTC AI Qualified Funnel",
                                   t_aiq_ttc,         nr, 13)
 nr_5 = write_ai_qual_funnel_table(ws_s, "Renewal_TTC AI Qualified Funnel",
                                   t_aiq_renewal_ttc, nr, 17)
-nr   = max(nr_1, nr_2, nr_3, nr_4, nr_5) + 2
+nr_6 = write_ai_qual_funnel_table(ws_s, "Broker AI Qualified Funnel",   # v22
+                                  t_aiq_broker,      nr, 21)
+nr   = max(nr_1, nr_2, nr_3, nr_4, nr_5, nr_6) + 2
 
 nr = write_planwise_block(
     ws_s, f"Planwise Today  {today_str}",
     build_planwise_rows(out_win_today, out_ttc_unc_today,
-                        out_ttc_today, out_renewal_ttc_today), nr, 1)
+                        out_ttc_today, out_renewal_ttc_today,
+                        out_broker_today), nr, 1)   # v22: +out_broker_today
 nr += 2
 nr = write_planwise_block(
     ws_s, "Planwise Overall",
-    build_planwise_rows(out_win, out_ttc_unc, out_ttc, out_renewal_ttc), nr, 1)
+    build_planwise_rows(out_win, out_ttc_unc, out_ttc, out_renewal_ttc,
+                        out_broker), nr, 1)          # v22: +out_broker
 nr += 2
 
 nr = write_plan_revenue_table(
@@ -3722,7 +4004,8 @@ write_plan_revenue_table(
 
 for col, w in {"A": 22, "B": 14, "C": 16, "D": 14, "E": 14, "F": 14, "G": 14,
                "H": 14, "I": 14, "J": 14, "K": 14, "L": 14, "M": 14, "N": 14,
-               "O": 14, "P": 14, "Q": 14, "R": 14, "S": 14, "T": 14}.items():
+               "O": 14, "P": 14, "Q": 14, "R": 14, "S": 14, "T": 14,
+               "U": 14, "V": 14, "W": 14}.items():  # v22
     ws_s.column_dimensions[col].width = w
 
 # Matrix detail tabs
@@ -3831,6 +4114,7 @@ print(f"   Purchased ({len(df_purchased_m)})  |  AI Qualified ({len(df_qualified
 write_summary_to_gsheet(
     gc, summary_today, summary_overall, today_str,
     t_aiq_all, t_aiq_win, t_aiq_ttc_unc, t_aiq_ttc, t_aiq_renewal_ttc,
+    t_aiq_broker,   # v22
     t_plan_rev
 )
 
