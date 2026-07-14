@@ -2155,7 +2155,7 @@ WINBACK_SHEETS = [
 
 RENEWAL_TTC_TAB_NAME = "Renewal_TTC"
 RENEWAL_TTC_SOURCE   = "Renewal_TTC"
-
+RENEWAL_TTC_SHEET_ID = "1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ"
 # v22: Broker (Campaign 5)
 BROKER_SHEET_ID = "1EmTqHH5yfcrdk2QL58pXdru3bumnmuGB9rGbinyPmuQ"
 BROKER_TAB_NAME = "Broker"
@@ -2396,8 +2396,17 @@ print("\n-- Campaign 3: Winback (single tab) -----------------------------------
 df_win_raw = gsheet_tab_to_df(tabs_map, WINBACK_SHEETS[0][1])
 
 print("\n-- Campaign 4: Renewal_TTC (single tab) ---------------------------------")
-df_renewal_ttc_raw = gsheet_tab_to_df(tabs_map, RENEWAL_TTC_TAB_NAME)
-
+# df_renewal_ttc_raw = gsheet_tab_to_df(tabs_map, RENEWAL_TTC_TAB_NAME)
+print("\n-- Campaign 4: Renewal_TTC (separate sheet, 'Renewal_TTC' tab) ----------")
+try:
+    _rttc_sh           = gc.open_by_key(RENEWAL_TTC_SHEET_ID)
+    _rttc_tabs         = {ws.title: ws for ws in _rttc_sh.worksheets()}
+    df_renewal_ttc_raw = gsheet_tab_to_df(_rttc_tabs, RENEWAL_TTC_TAB_NAME)
+    print(f"   Renewal TTC sheet tabs: {list(_rttc_tabs.keys())}")
+except Exception as _rttc_err:
+    print(f"   WARNING: Could not load Renewal TTC sheet: {_rttc_err}")
+    df_renewal_ttc_raw = pd.DataFrame()
+    
 print("\n-- Campaign 5: Broker (separate sheet, 'Broker' tab) --------------------")
 try:
     _brk_sh       = gc.open_by_key(BROKER_SHEET_ID)
